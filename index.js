@@ -25,7 +25,7 @@ function StreamRecompressor(headersRequest = {}, headersResponse = {}) {
 	if (size > 64 * 1024 * 1024) return doNothing();
 
 	let encodingIn = detectEncoding(headersResponse['content-encoding']);
-	let encodingOut = detectEncoding(headersRequest['accept-encoding']);
+	let encodingOut = detectEncoding(headersRequest['accept-encoding'], encodingIn.name);
 
 	encodingOut.setEncoding(headersResponse);
 
@@ -40,10 +40,10 @@ function StreamRecompressor(headersRequest = {}, headersResponse = {}) {
 		return new PassThrough();
 	}
 
-	function detectEncoding(text) {
+	function detectEncoding(text, alreadyCompressed = false) {
 		text = ('' + text).toLowerCase();
 
-		if (text.includes('br')) return {
+		if ((alreadyCompressed !== 'gzip') && text.includes('br')) return {
 			name: 'br',
 			compress: size => {
 				let params = { [zlib.constants.BROTLI_PARAM_QUALITY]: zlib.constants.BROTLI_MAX_QUALITY };
