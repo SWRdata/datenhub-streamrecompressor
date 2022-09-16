@@ -112,7 +112,7 @@ function httpStreamRecompress(headersRequest = {}, headersResponse = {}, streamI
 			headersResponse['transfer-encoding'] = 'chunked';
 		}
 
-		console.log({headersResponse, size, fastCompression, encodingIn, encodingOut});
+		console.error({headersResponse, size, fastCompression, encodingIn, encodingOut});
 		
 		encodingOut.setEncoding(headersResponse);
 
