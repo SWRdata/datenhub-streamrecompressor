@@ -89,8 +89,13 @@ function httpStreamRecompress(headersRequest = {}, headersResponse = {}, streamI
 	// do nothing, when encodings are equal:
 	if (encodingIn.name === encodingOut.name) return passThrough();
 
-	// do recompression with streams
-	return recompressViaStream();
+	if (size && (size < 16*MB)) {
+		// do recompression with buffers
+		return recompressViaBuffer();
+	} else {
+		// do recompression with streams
+		return recompressViaStream();
+	}
 
 
 
@@ -115,6 +120,25 @@ function httpStreamRecompress(headersRequest = {}, headersResponse = {}, streamI
 		if (transform2) stream = stream.pipe(transform2)
 		
 		stream.pipe(response);
+	}
+
+	async function recompressViaBuffer() {
+		let buffer = [];
+
+		streamIn.on('data', chunk => buffer.push(chunk));
+		await new Promise(resolve => streamIn.on('end', resolve))
+
+		buffer = Buffer.concat(buffer);
+		buffer = encodingIn.decompressBuffer(buffer);
+		buffer = encodingOut.compressBuffer(fastCompression, fastCompression);
+
+		headersResponse['content-length'] = buffer.length;
+		encodingOut.setEncoding(headersResponse);
+
+		response
+			.status(200)
+			.set(headersResponse)
+			.end(buffer);
 	}
 
 	function prepareStreaming() {
