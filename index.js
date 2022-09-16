@@ -1,6 +1,7 @@
 'user strict'
 
 const zlib = require('zlib');
+const through = require('through2');
 
 module.exports = {
 	httpStreamRecompress,
@@ -60,99 +61,59 @@ const ENCODINGS = {
 }
 
 function httpStreamRecompress(headersRequest = {}, headersResponse = {}, streamIn, response, fastCompression = false) {
-	
+	// detect encoding:
+	let encodingIn = detectEncoding(headersResponse['content-encoding']);
+	let encodingOut;
+
 	let type = ('' + headersResponse['content-type']).replace(/\/.*/, '').toLowerCase();
 
 	// do not recompress images, videos, ...
 	switch (type) {
-		case 'image': return passThrough();
-		case 'video': return passThrough();
+		case 'audio':
+		case 'image':
+		case 'video':
+			encodingOut = ENCODINGS.raw();
+		break;
+		default:
+			let ignoreBrotli = fastCompression && (encodingIn.name === 'gzip');
+			encodingOut = detectEncoding(headersRequest['accept-encoding'], ignoreBrotli);
 	}
+
 	headersResponse['vary'] = 'accept-encoding';
 
-	let size = headersResponse['content-length'];
-	if (size === undefined) fastCompression = true; // might be big
+	encodingOut.setEncoding(headersResponse);
 
-	size = parseInt(size, 10) || false;
+	let stream = streamIn;
 
-	// do not recompress, when size is to small:
-	if (size && (size < 100)) return passThrough();
+	let transform1 = encodingIn.decompressStream();
+	if (transform1) stream = stream.pipe(transform1)
 
-	// use fast compression, when to big
-	if (size > 16 * MB) fastCompression = true;
+	stream.pipe(BufferStream(16*MB,
+		async (buffer) => {
+			buffer = await encodingOut.compressBuffer(buffer, fastCompression);
 
-	// detect encoding:
-	let encodingIn = detectEncoding(headersResponse['content-encoding']);
-	let ignoreBrotli = fastCompression && (encodingIn.name === 'gzip');
-	let encodingOut = detectEncoding(headersRequest['accept-encoding'], ignoreBrotli);
-
-	// do nothing, when encodings are equal:
-	if (encodingIn.name === encodingOut.name) return passThrough();
-
-	if (size && (size < 16*MB)) {
-		// do recompression with buffers
-		return recompressViaBuffer();
-	} else {
-		// do recompression with streams
-		return recompressViaStream();
-	}
-
-
-
-	function passThrough() {
-		prepareStreaming();
-		
-		streamIn.pipe(response);
-	}
-
-	function recompressViaStream() {
-		delete headersResponse['content-length'];
-		encodingOut.setEncoding(headersResponse);
-
-		prepareStreaming()
-
-		let stream = streamIn;
-
-		let transform1 = encodingIn.decompressStream();
-		if (transform1) stream = stream.pipe(transform1)
-
-		let transform2 = encodingOut.compressStream(fastCompression, size);
-		if (transform2) stream = stream.pipe(transform2)
-		
-		stream.pipe(response);
-	}
-
-	async function recompressViaBuffer() {
-		let buffer = [];
-
-		streamIn.on('data', chunk => buffer.push(chunk));
-		await new Promise(resolve => streamIn.on('end', resolve))
-
-		buffer = Buffer.concat(buffer);
-		buffer = await encodingIn.decompressBuffer(buffer);
-		buffer = await encodingOut.compressBuffer(buffer, fastCompression);
-
-		headersResponse['content-length'] = buffer.length;
-		encodingOut.setEncoding(headersResponse);
-
-		response
-			.status(200)
-			.set(headersResponse)
-			.end(buffer);
-	}
-
-	function prepareStreaming() {
-		if (size && (size < 4*MB)) {
 			delete headersResponse['transfer-encoding'];
-		} else {
+			headersResponse['content-length'] = buffer.length;
+
+			response
+				.status(200)
+				.set(headersResponse)
+				.end(buffer);
+		},
+		(stream) => {
 			headersResponse['transfer-encoding'] = 'chunked';
 			delete headersResponse['content-length'];
+
+			response
+				.status(200)
+				.set(headersResponse)
+
+			let transform2 = encodingOut.compressStream(fastCompression);
+			if (transform2) stream = stream.pipe(transform2);
+
+			stream.pipe(response);
 		}
-		
-		response
-			.status(200)
-			.set(headersResponse);
-	}
+	))
 
 	function detectEncoding(text, ignoreBrotli) {
 		text = ('' + text).toLowerCase();
@@ -162,4 +123,30 @@ function httpStreamRecompress(headersRequest = {}, headersResponse = {}, streamI
 		if (text.includes('deflate')) return ENCODINGS.deflate();
 		return ENCODINGS.raw();
 	}
+}
+
+function BufferStream(maxSize, handleBuffer, handleStream) {
+	let buffers = [], size = 0, bufferMode = true;
+	let stream = through(
+		function (chunk, enc, cb) {
+			if (bufferMode) {
+				buffers.push(chunk);
+				size += chunk.length;
+				if (size >= maxSize) {
+					bufferMode = false;
+					handleStream(stream);
+					for (let buffer of buffers) this.push(buffer);
+				}
+				return cb();
+			} else {
+				cb(null, chunk);
+			}
+		},
+		(cb) => {
+			//console.log({size, bufferMode});
+			if (bufferMode) handleBuffer(Buffer.concat(buffers));
+			cb()
+		}
+	)
+	return stream;
 }
