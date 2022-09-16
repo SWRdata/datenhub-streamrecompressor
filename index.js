@@ -105,7 +105,12 @@ function httpStreamRecompress(headersRequest = {}, headersResponse = {}, streamI
 	function recompressViaStream() {
 		delete headersResponse['content-encoding'];
 		delete headersResponse['content-length'];
-		delete headersResponse['transfer-encoding'];
+
+		if (size && (size < 4*MB)) {
+			delete headersResponse['transfer-encoding'];
+		} else {
+			headersResponse['transfer-encoding'] = 'chunked';
+		}
 		
 		encodingOut.setEncoding(headersResponse);
 
