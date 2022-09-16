@@ -21,8 +21,8 @@ function StreamRecompressor(headersRequest = {}, headersResponse = {}, fastCompr
 	let size = parseInt(headersResponse['content-length'], 10);
 	if (size < 100) return doNothing();
 
-	// do not recompress, when size is to big:
-	if (size > 64 * 1024 * 1024) return doNothing();
+	// do fast recompression, when size is to big:
+	if (size > 32 * 1024 * 1024) fastCompression = true;
 
 	let encodingIn = detectEncoding(headersResponse['content-encoding']);
 	let encodingOut = detectEncoding(headersRequest['accept-encoding'], encodingIn.name);
