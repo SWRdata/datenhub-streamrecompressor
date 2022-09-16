@@ -60,8 +60,6 @@ const ENCODINGS = {
 }
 
 function httpStreamRecompress(headersRequest = {}, headersResponse = {}, streamIn, response, fastCompression = false) {
-	console.error('httpStreamRecompress');
-	
 	let type = ('' + headersResponse['content-type']).replace(/\/.*/, '').toLowerCase();
 
 	// do not recompress images, videos, ...
@@ -96,11 +94,8 @@ function httpStreamRecompress(headersRequest = {}, headersResponse = {}, streamI
 
 
 	function passThrough() {
-		console.error('passThrough1', { headersResponse, size, fastCompression, encodingIn, encodingOut });
 		prepareStreaming();
 		
-		console.error('passThrough2', { headersResponse, size, fastCompression, encodingIn, encodingOut });
-
 		streamIn.pipe(response);
 	}
 
@@ -110,10 +105,7 @@ function httpStreamRecompress(headersRequest = {}, headersResponse = {}, streamI
 		
 		encodingOut.setEncoding(headersResponse);
 
-		console.error('recompressViaStream1', { headersResponse, size, fastCompression, encodingIn, encodingOut });
 		prepareStreaming()
-
-		console.error('recompressViaStream2', { headersResponse, size, fastCompression, encodingIn, encodingOut });
 
 		let stream = streamIn;
 
