@@ -94,37 +94,22 @@ function httpStreamRecompress(headersRequest = {}, headersResponse = {}, streamI
 
 
 	function passThrough() {
-		if (size && (size < 4*MB)) {
-			delete headersResponse['transfer-encoding'];
-		} else {
-			headersResponse['transfer-encoding'] = 'chunked';
-		}
+		prepareStreaming();
 		
-		response
-			.status(200)
-			.set(headersResponse);
+		console.error('passThrough', { headersResponse, size, fastCompression, encodingIn, encodingOut });
 
-		streamIn
-			.pipe(response);
+		streamIn.pipe(response);
 	}
 
 	function recompressViaStream() {
 		delete headersResponse['content-encoding'];
 		delete headersResponse['content-length'];
-
-		if (size && (size < 4*MB)) {
-			delete headersResponse['transfer-encoding'];
-		} else {
-			headersResponse['transfer-encoding'] = 'chunked';
-		}
-
-		console.error({ headersResponse, size, fastCompression, encodingIn, encodingOut });
 		
 		encodingOut.setEncoding(headersResponse);
 
-		response
-			.status(200)
-			.set(headersResponse);
+		prepareStreaming()
+
+		console.error('recompressViaStream', { headersResponse, size, fastCompression, encodingIn, encodingOut });
 
 		let stream = streamIn;
 
@@ -135,6 +120,18 @@ function httpStreamRecompress(headersRequest = {}, headersResponse = {}, streamI
 		if (transform2) stream = stream.pipe(transform2)
 		
 		stream.pipe(response);
+	}
+
+	function prepareStreaming() {
+		if (size && (size < 4*MB)) {
+			delete headersResponse['transfer-encoding'];
+		} else {
+			headersResponse['transfer-encoding'] = 'chunked';
+		}
+		
+		response
+			.status(200)
+			.set(headersResponse);
 	}
 
 	function detectEncoding(text, ignoreBrotli) {
