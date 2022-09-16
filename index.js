@@ -1,94 +1,135 @@
 'user strict'
 
-const zlib = require('zlib')
-const pumpify = require('pumpify')
-const { PassThrough } = require('stream');
+const zlib = require('zlib');
 
 module.exports = {
-	StreamRecompressor,
+	httpStreamRecompress,
 }
 
-function StreamRecompressor(headersRequest = {}, headersResponse = {}, fastCompression = false) {
-	let type = (''+headersResponse['content-type']).replace(/\/.*/, '').toLowerCase();
+const MB = 1024*1024;
+const ENCODINGS = {
+	br: () => {
+		function getOptions(fast, size) {
+			let params = { [zlib.constants.BROTLI_PARAM_QUALITY]: fast ? 3 : 11 };
+			if (size) params[zlib.constants.BROTLI_PARAM_SIZE_HINT] = size;
+			return { params };
+		}
+		return {
+			name: 'br',
+			compressStream: (fast, size) => zlib.createBrotliCompress(getOptions(fast, size)),
+			decompressStream: () => zlib.createBrotliDecompress(),
+			compressBuffer: (buffer, fast) => new Promise(res => zlib.brotliCompress(buffer, getOptions(fast, buffer.length), res)),
+			decompressBuffer: (buffer) => new Promise(res => zlib.brotliDecompress(buffer, res)),
+			setEncoding: (headers) => headers['content-encoding'] = 'br',
+		}
+	},
+	gzip: () => {
+		function getOptions(fast) {
+			return { level: fast ? 3 : 9 }
+		}
+		return {
+			name: 'gzip',
+			compressStream: (fast) => zlib.createGzip(getOptions(fast)),
+			decompressStream: () => zlib.createGunzip(),
+			compressBuffer: (buffer, fast) => new Promise(res => zlib.gzip(buffer, getOptions(fast), res)),
+			decompressBuffer: (buffer) => new Promise(res => zlib.gunzip(buffer, res)),
+			setEncoding: (headers) => headers['content-encoding'] = 'gzip',
+		}
+	},
+	deflate: () => {
+		function getOptions(fast) {
+			return { level: fast ? 3 : 9 }
+		}
+		return {
+			name: 'deflate',
+			compressStream: (fast) => zlib.createDeflate(getOptions(fast)),
+			decompressStream: () => zlib.createInflate(),
+			compressBuffer: (buffer, fast) => new Promise(res => zlib.deflate(buffer, getOptions(fast), res)),
+			decompressBuffer: (buffer) => new Promise(res => zlib.inflate(buffer, res)),
+			setEncoding: (headers) => headers['content-encoding'] = 'deflate',
+		}
+	},
+	raw: () => ({
+		name: 'raw',
+		compressStream: () => false,
+		decompressStream: () => false,
+		compressBuffer: buffer => buffer,
+		decompressBuffer: buffer => buffer,
+		setEncoding: (headers) => { delete headers['content-encoding'] },
+	}),
+}
+
+function httpStreamRecompress(headersRequest = {}, headersResponse = {}, streamIn, response, fastCompression = false) {
+	let type = ('' + headersResponse['content-type']).replace(/\/.*/, '').toLowerCase();
 
 	// do not recompress images, videos, ...
 	switch (type) {
-		case 'image': return doNothing();
-		case 'video': return doNothing();
+		case 'image': return passThrough();
+		case 'video': return passThrough();
 	}
+	headersResponse['vary'] = 'accept-encoding';
+
+	let size = headersResponse['content-length'];
+	if (size === undefined) fastCompression = true; // might be big
+
+	size = parseInt(size, 10) || false;
 
 	// do not recompress, when size is to small:
-	let size = parseInt(headersResponse['content-length'], 10);
-	if (size < 100) return doNothing();
+	if (size && (size < 100)) return passThrough();
 
-	// do fast recompression, when size is to big:
-	if (size > 32 * 1024 * 1024) fastCompression = true;
+	// use fast compression, when to big
+	if (size > 16 * MB) fastCompression = true;
 
+	// detect encoding:
 	let encodingIn = detectEncoding(headersResponse['content-encoding']);
-	let encodingOut = detectEncoding(headersRequest['accept-encoding'], encodingIn.name);
+	let ignoreBrotli = fastCompression && (encodingIn.name === 'gzip');
+	let encodingOut = detectEncoding(headersRequest['accept-encoding'], ignoreBrotli);
 
-	encodingOut.setEncoding(headersResponse);
+	// do nothing, when encodings are equal:
+	if (encodingIn.name === encodingOut.name) return passThrough();
 
-	if (encodingIn.name === encodingOut.name) return doNothing();
+	// do recompression with streams
+	return recompressViaStream();
 
-	return mergeStream(
-		encodingIn.decompress(),
-		encodingOut.compress(size),
-	)
 
-	function doNothing() {
-		return new PassThrough();
+
+	function passThrough() {
+		response
+			.status(200)
+			.set(headersResponse);
+
+		streamIn
+			.pipe(response);
 	}
 
-	function detectEncoding(text, alreadyCompressed = false) {
+	function recompressViaStream() {
+		delete headersResponse['content-encoding'];
+		delete headersResponse['content-length'];
+		delete headersResponse['transfer-encoding'];
+		
+		encodingOut.setEncoding(headersResponse);
+
+		response
+			.status(200)
+			.set(headersResponse);
+
+		let stream = streamIn;
+
+		let transform1 = encodingIn.decompressStream();
+		if (transform1) stream = stream.pipe(transform1)
+
+		let transform2 = encodingOut.compressStream(fastCompression, size);
+		if (transform2) stream = stream.pipe(transform2)
+		
+		stream.pipe(response);
+	}
+
+	function detectEncoding(text, ignoreBrotli) {
 		text = ('' + text).toLowerCase();
 
-		if ((alreadyCompressed !== 'gzip') && text.includes('br')) return {
-			name: 'br',
-			compress: size => {
-				let params = { [zlib.constants.BROTLI_PARAM_QUALITY]: fastCompression ? 5 : 11 };
-				if (size) params[zlib.constants.BROTLI_PARAM_SIZE_HINT] = size;
-				return zlib.createBrotliCompress({ params })
-			},
-			decompress: () => zlib.createBrotliDecompress(),
-			setEncoding: headers => headers['content-encoding'] = 'br',
-		}
-
-		if (text.includes('gzip')) return {
-			name: 'gzip',
-			compress: () => zlib.createGzip({ level: fastCompression ? 5 : 9 }),
-			decompress: () => zlib.createGunzip(),
-			setEncoding: headers => headers['content-encoding'] = 'gzip',
-		}
-
-		if (text.includes('deflate')) return {
-			name: 'deflate',
-			compress: () => zlib.createDeflate({ level: fastCompression ? 5 : 9 }),
-			decompress: () => zlib.createInflate(),
-			setEncoding: headers => headers['content-encoding'] = 'deflate',
-		}
-
-		return {
-			name: 'raw',
-			compress: () => false,
-			decompress: () => false,
-			setEncoding: headers => { delete headers['content-encoding'] },
-		}
-	}
-
-	function mergeStream(stream1, stream2) {
-		if (!stream1) {
-			if (!stream2) {
-				return doNothing();
-			} else {
-				return stream2;
-			}
-		} else {
-			if (!stream2) {
-				return stream1;
-			} else {
-				return pumpify(stream1, stream2);
-			}
-		}
+		if (!ignoreBrotli && text.includes('br')) return ENCODINGS.br();
+		if (text.includes('gzip')) return ENCODINGS.gzip();
+		if (text.includes('deflate')) return ENCODINGS.deflate();
+		return ENCODINGS.raw();
 	}
 }
