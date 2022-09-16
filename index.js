@@ -9,12 +9,7 @@ module.exports = {
 }
 
 function StreamRecompressor(headersRequest = {}, headersResponse = {}, fastCompression = false) {
-	let type = headersResponse['content-type'];
-	if (!type) {
-		console.error('No type in response:', JSON.stringify(headersResponse));
-		type = '';
-	}
-	type = type.replace(/\/.*/, '').toLowerCase();
+	let type = (''+headersResponse['content-type']).replace(/\/.*/, '').toLowerCase();
 
 	// do not recompress images, videos, ...
 	switch (type) {
