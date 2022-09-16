@@ -8,7 +8,7 @@ module.exports = {
 	StreamRecompressor,
 }
 
-function StreamRecompressor(headersRequest = {}, headersResponse = {}) {
+function StreamRecompressor(headersRequest = {}, headersResponse = {}, fastCompression = false) {
 	let type = headersResponse['content-type'].replace(/\/.*/, '').toLowerCase();
 
 	// do not recompress images, videos, ...
@@ -46,7 +46,7 @@ function StreamRecompressor(headersRequest = {}, headersResponse = {}) {
 		if ((alreadyCompressed !== 'gzip') && text.includes('br')) return {
 			name: 'br',
 			compress: size => {
-				let params = { [zlib.constants.BROTLI_PARAM_QUALITY]: zlib.constants.BROTLI_MAX_QUALITY };
+				let params = { [zlib.constants.BROTLI_PARAM_QUALITY]: fastCompression ? 5 : 11 };
 				if (size) params[zlib.constants.BROTLI_PARAM_SIZE_HINT] = size;
 				return zlib.createBrotliCompress({ params })
 			},
@@ -56,14 +56,14 @@ function StreamRecompressor(headersRequest = {}, headersResponse = {}) {
 
 		if (text.includes('gzip')) return {
 			name: 'gzip',
-			compress: () => zlib.createGzip({ level: 9 }),
+			compress: () => zlib.createGzip({ level: fastCompression ? 5 : 9 }),
 			decompress: () => zlib.createGunzip(),
 			setEncoding: headers => headers['content-encoding'] = 'gzip',
 		}
 
 		if (text.includes('deflate')) return {
 			name: 'deflate',
-			compress: () => zlib.createDeflate({ level: 9 }),
+			compress: () => zlib.createDeflate({ level: fastCompression ? 5 : 9 }),
 			decompress: () => zlib.createInflate(),
 			setEncoding: headers => headers['content-encoding'] = 'deflate',
 		}
