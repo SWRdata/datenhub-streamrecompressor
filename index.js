@@ -94,6 +94,12 @@ function httpStreamRecompress(headersRequest = {}, headersResponse = {}, streamI
 
 
 	function passThrough() {
+		if (size && (size < 4*MB)) {
+			delete headersResponse['transfer-encoding'];
+		} else {
+			headersResponse['transfer-encoding'] = 'chunked';
+		}
+		
 		response
 			.status(200)
 			.set(headersResponse);
@@ -112,7 +118,7 @@ function httpStreamRecompress(headersRequest = {}, headersResponse = {}, streamI
 			headersResponse['transfer-encoding'] = 'chunked';
 		}
 
-		console.error({headersResponse, size, fastCompression, encodingIn, encodingOut});
+		console.error({ headersResponse, size, fastCompression, encodingIn, encodingOut });
 		
 		encodingOut.setEncoding(headersResponse);
 
