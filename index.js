@@ -60,6 +60,7 @@ const ENCODINGS = {
 }
 
 function httpStreamRecompress(headersRequest = {}, headersResponse = {}, streamIn, response, fastCompression = false) {
+	
 	let type = ('' + headersResponse['content-type']).replace(/\/.*/, '').toLowerCase();
 
 	// do not recompress images, videos, ...
@@ -100,9 +101,7 @@ function httpStreamRecompress(headersRequest = {}, headersResponse = {}, streamI
 	}
 
 	function recompressViaStream() {
-		delete headersResponse['content-encoding'];
 		delete headersResponse['content-length'];
-		
 		encodingOut.setEncoding(headersResponse);
 
 		prepareStreaming()
@@ -123,6 +122,7 @@ function httpStreamRecompress(headersRequest = {}, headersResponse = {}, streamI
 			delete headersResponse['transfer-encoding'];
 		} else {
 			headersResponse['transfer-encoding'] = 'chunked';
+			delete headersResponse['content-length'];
 		}
 		
 		response
