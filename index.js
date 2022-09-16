@@ -18,8 +18,8 @@ const ENCODINGS = {
 			name: 'br',
 			compressStream: (fast, size) => zlib.createBrotliCompress(getOptions(fast, size)),
 			decompressStream: () => zlib.createBrotliDecompress(),
-			compressBuffer: (buffer, fast) => new Promise(res => zlib.brotliCompress(buffer, getOptions(fast, buffer.length), res)),
-			decompressBuffer: (buffer) => new Promise(res => zlib.brotliDecompress(buffer, res)),
+			compressBuffer: (buffer, fast) => new Promise(res => zlib.brotliCompress(buffer, getOptions(fast, buffer.length), (e,b) => res(b))),
+			decompressBuffer: (buffer) => new Promise(res => zlib.brotliDecompress(buffer, (e,b) => res(b))),
 			setEncoding: (headers) => headers['content-encoding'] = 'br',
 		}
 	},
@@ -31,8 +31,8 @@ const ENCODINGS = {
 			name: 'gzip',
 			compressStream: (fast) => zlib.createGzip(getOptions(fast)),
 			decompressStream: () => zlib.createGunzip(),
-			compressBuffer: (buffer, fast) => new Promise(res => zlib.gzip(buffer, getOptions(fast), res)),
-			decompressBuffer: (buffer) => new Promise(res => zlib.gunzip(buffer, res)),
+			compressBuffer: (buffer, fast) => new Promise(res => zlib.gzip(buffer, getOptions(fast), (e,b) => res(b))),
+			decompressBuffer: (buffer) => new Promise(res => zlib.gunzip(buffer, (e,b) => res(b))),
 			setEncoding: (headers) => headers['content-encoding'] = 'gzip',
 		}
 	},
@@ -44,8 +44,8 @@ const ENCODINGS = {
 			name: 'deflate',
 			compressStream: (fast) => zlib.createDeflate(getOptions(fast)),
 			decompressStream: () => zlib.createInflate(),
-			compressBuffer: (buffer, fast) => new Promise(res => zlib.deflate(buffer, getOptions(fast), res)),
-			decompressBuffer: (buffer) => new Promise(res => zlib.inflate(buffer, res)),
+			compressBuffer: (buffer, fast) => new Promise(res => zlib.deflate(buffer, getOptions(fast), (e,b) => res(b))),
+			decompressBuffer: (buffer) => new Promise(res => zlib.inflate(buffer, (e,b) => res(b))),
 			setEncoding: (headers) => headers['content-encoding'] = 'deflate',
 		}
 	},
@@ -129,8 +129,8 @@ function httpStreamRecompress(headersRequest = {}, headersResponse = {}, streamI
 		await new Promise(resolve => streamIn.on('end', resolve))
 
 		buffer = Buffer.concat(buffer);
-		buffer = encodingIn.decompressBuffer(buffer);
-		buffer = encodingOut.compressBuffer(fastCompression, fastCompression);
+		buffer = await encodingIn.decompressBuffer(buffer);
+		buffer = await encodingOut.compressBuffer(buffer, fastCompression);
 
 		headersResponse['content-length'] = buffer.length;
 		encodingOut.setEncoding(headersResponse);
