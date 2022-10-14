@@ -88,6 +88,7 @@ function httpStreamRecompress(headersRequest = {}, headersResponse = {}, streamI
 	let transform1 = encodingIn.decompressStream();
 	if (transform1) stream = stream.pipe(transform1)
 
+
 	stream.pipe(BufferStream(16*MB,
 		async (buffer) => {
 			buffer = await encodingOut.compressBuffer(buffer, fastCompression);
@@ -113,7 +114,9 @@ function httpStreamRecompress(headersRequest = {}, headersResponse = {}, streamI
 
 			stream.pipe(response);
 		}
-	))
+}
+
+
 
 	function detectEncoding(text, ignoreBrotli) {
 		text = ('' + text).toLowerCase();
@@ -122,8 +125,9 @@ function httpStreamRecompress(headersRequest = {}, headersResponse = {}, streamI
 		if (text.includes('gzip')) return ENCODINGS.gzip();
 		if (text.includes('deflate')) return ENCODINGS.deflate();
 		return ENCODINGS.raw();
-	}
 }
+
+
 
 function BufferStream(maxSize, handleBuffer, handleStream) {
 	let buffers = [], size = 0, bufferMode = true;
@@ -143,7 +147,6 @@ function BufferStream(maxSize, handleBuffer, handleStream) {
 			}
 		},
 		(cb) => {
-			//console.log({size, bufferMode});
 			if (bufferMode) handleBuffer(Buffer.concat(buffers));
 			cb()
 		}

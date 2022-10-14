@@ -3,15 +3,18 @@
 const zlib = require('zlib');
 const miss = require('mississippi2');
 const { httpStreamRecompress } = require('./index.js');
-const { writeFileSync } = require('fs');
 
-const KB = 1024;
-const MB = 1024 * 1024;
+
 
 start()
 
+
+
 async function start() {
-	const tests = [];
+	const KB = 1024;
+	const MB = 1024 * 1024;
+
+	let tests = [];
 	for (let contentType of [false, 'image/png', 'application/json']) {
 		for (let acceptEncoding of ['', 'gzip, deflate, br', 'gzip, deflate']) {
 			for (let compression of ['raw', 'gzip', 'br']) {
@@ -26,16 +29,13 @@ async function start() {
 		}
 	}
 
-	//let data = Uint8Array.from({ length: 256 }, () => Math.floor(Math.random() * 256));
-	let data = Uint8Array.from({ length: 256 }, (v,i) => i);
+	let data = Uint8Array.from({ length: 256 }, () => Math.floor(Math.random() * 256));
 	data = Buffer.from(data.buffer);
 		
-	for (let index = 0; index < tests.length; index++) {
+	for (let [index, test] of tests.entries()) {
 		process.stderr.write(`\r   ${index + 1}/${tests.length}`)
 
-		const test = tests[index];
 		const { contentType, acceptEncoding, compression, size, useContentLength, fast } = test;
-		//console.log(test);
 
 		let bufferRawIn = Buffer.allocUnsafe(size);
 		for (let i = 0; i < size; i += data.length) data.copy(bufferRawIn, i);
@@ -78,8 +78,6 @@ async function start() {
 		let bufferRawOut;
 		let contentEncoding = responseHeaders['content-encoding']
 		
-		//console.log({ headersResponseIn, responseHeaders }, compression, [bufferRawIn.length, bufferIn.length, bufferOut.length]);
-		
 		switch (contentEncoding) {
 			case undefined: bufferRawOut = bufferOut; break;
 			case 'br': bufferRawOut = zlib.brotliDecompressSync(bufferOut); break;
@@ -96,7 +94,5 @@ async function start() {
 		}
 	}
 
-
+	console.log('\nFinished')
 }
-
-
