@@ -1,8 +1,10 @@
 'use strict'
 
-const zlib = require('zlib');
-const miss = require('mississippi2');
-const { httpStreamRecompress } = require('./index.js');
+
+
+import zlib from 'zlib';
+import miss from 'mississippi2';
+import { httpStreamRecompress } from './index.js';
 
 
 
@@ -31,7 +33,7 @@ async function start() {
 
 	let data = Uint8Array.from({ length: 256 }, () => Math.floor(Math.random() * 256));
 	data = Buffer.from(data.buffer);
-		
+	
 	for (let [index, test] of tests.entries()) {
 		process.stderr.write(`\r   ${index + 1}/${tests.length}`)
 

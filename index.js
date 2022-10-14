@@ -1,11 +1,12 @@
 'user strict'
 
-const zlib = require('zlib');
-const through = require('through2');
 
-module.exports = {
-	httpStreamRecompress,
-}
+
+import zlib from 'zlib';
+import through from 'through2';
+import PQueue from 'p-queue';
+
+
 
 const MB = 1024*1024;
 const ENCODINGS = {
@@ -60,71 +61,88 @@ const ENCODINGS = {
 	}),
 }
 
-function httpStreamRecompress(headersRequest = {}, headersResponse = {}, streamIn, response, fastCompression = false) {
-	// detect encoding:
-	let encodingIn = detectEncoding(headersResponse['content-encoding']);
-	let encodingOut;
-
-	let type = ('' + headersResponse['content-type']).replace(/\/.*/, '').toLowerCase();
-
-	// do not recompress images, videos, ...
-	switch (type) {
-		case 'audio':
-		case 'image':
-		case 'video':
-			encodingOut = ENCODINGS.raw();
-		break;
-		default:
-			let ignoreBrotli = fastCompression && (encodingIn.name === 'gzip');
-			encodingOut = detectEncoding(headersRequest['accept-encoding'], ignoreBrotli);
-	}
-
-	headersResponse['vary'] = 'accept-encoding';
-
-	encodingOut.setEncoding(headersResponse);
-
-	let stream = streamIn;
-
-	let transform1 = encodingIn.decompressStream();
-	if (transform1) stream = stream.pipe(transform1)
 
 
-	stream.pipe(BufferStream(16*MB,
-		async (buffer) => {
-			buffer = await encodingOut.compressBuffer(buffer, fastCompression);
-
-			delete headersResponse['transfer-encoding'];
-			headersResponse['content-length'] = buffer.length;
-
-			response
-				.status(200)
-				.set(headersResponse)
-				.end(buffer);
-		},
-		(stream) => {
-			headersResponse['transfer-encoding'] = 'chunked';
-			delete headersResponse['content-length'];
-
-			response
-				.status(200)
-				.set(headersResponse)
-
-			let transform2 = encodingOut.compressStream(fastCompression);
-			if (transform2) stream = stream.pipe(transform2);
-
-			stream.pipe(response);
-		}
+const queue = new PQueue({
+	concurrency: 1,
+	timeout: 3*60*1000,
+});
+export {
+	httpStreamRecompress,
 }
 
 
 
-	function detectEncoding(text, ignoreBrotli) {
-		text = ('' + text).toLowerCase();
+function httpStreamRecompress(headersRequest = {}, headersResponse = {}, streamIn, response, fastCompression = false) {
+	queue.add(() => new Promise(resolve => {
+		// detect encoding:
+		let encodingIn = detectEncoding(headersResponse['content-encoding']);
+		let encodingOut;
 
-		if (!ignoreBrotli && text.includes('br')) return ENCODINGS.br();
-		if (text.includes('gzip')) return ENCODINGS.gzip();
-		if (text.includes('deflate')) return ENCODINGS.deflate();
-		return ENCODINGS.raw();
+		let type = ('' + headersResponse['content-type']).replace(/\/.*/, '').toLowerCase();
+
+		// do not recompress images, videos, ...
+		switch (type) {
+			case 'audio':
+			case 'image':
+			case 'video':
+				encodingOut = ENCODINGS.raw();
+			break;
+			default:
+				let ignoreBrotli = fastCompression && (encodingIn.name === 'gzip');
+				encodingOut = detectEncoding(headersRequest['accept-encoding'], ignoreBrotli);
+		}
+
+		headersResponse['vary'] = 'accept-encoding';
+
+		encodingOut.setEncoding(headersResponse);
+
+		let stream = streamIn;
+
+		let transform1 = encodingIn.decompressStream();
+		if (transform1) stream = stream.pipe(transform1)
+
+
+		stream.pipe(BufferStream(16*MB,
+			async (buffer) => {
+				buffer = await encodingOut.compressBuffer(buffer, fastCompression);
+
+				delete headersResponse['transfer-encoding'];
+				headersResponse['content-length'] = buffer.length;
+
+				response
+					.status(200)
+					.set(headersResponse)
+					.end(buffer);
+				
+				resolve();
+			},
+			(stream) => {
+				headersResponse['transfer-encoding'] = 'chunked';
+				delete headersResponse['content-length'];
+
+				response
+					.status(200)
+					.set(headersResponse)
+
+				let transform2 = encodingOut.compressStream(fastCompression);
+				if (transform2) stream = stream.pipe(transform2);
+
+				stream.pipe(response).on('finish', () => resolve());
+			}
+		));
+	}))
+}
+
+
+
+function detectEncoding(text, ignoreBrotli) {
+	text = ('' + text).toLowerCase();
+
+	if (!ignoreBrotli && text.includes('br')) return ENCODINGS.br();
+	if (text.includes('gzip')) return ENCODINGS.gzip();
+	if (text.includes('deflate')) return ENCODINGS.deflate();
+	return ENCODINGS.raw();
 }
 
 

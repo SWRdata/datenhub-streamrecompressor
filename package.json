@@ -11,7 +11,9 @@
   "devDependencies": {
     "mississippi2": "^1.0.5"
   },
+  "type": "module",
   "dependencies": {
+    "p-queue": "^7.3.0",
     "through2": "^4.0.2"
   }
 }
