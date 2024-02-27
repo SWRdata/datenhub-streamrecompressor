@@ -8,19 +8,37 @@ import { httpStreamRecompress } from './index.js';
 
 
 
-start()
-
 
 
 async function start() {
 	const KB = 1024;
 	const MB = 1024 * 1024;
+	const compressions = ['raw', 'gzip', 'br'];
+	const sizes = [50, 50 * KB, 2 * MB, 9 * MB, 33 * MB];
 
-	let tests = [];
+	const testBuffer = new TestBuffer();
+
+
+
+	// generate preparations
+	const preparations = [];
+	for (let compression of compressions) for (let size of sizes) preparations.push({ size, compression });
+
+	// run preparations
+	for (let [index, { size, compression }] of preparations.entries()) {
+		process.stderr.write(`\rprepare test buffers: ${(100 * (index + 1) / preparations.length).toFixed(0)}%`)
+		testBuffer.get(compression, size);
+	}
+	console.log('')
+
+
+
+	// generate tests
+	const tests = [];
 	for (let contentType of [false, 'image/png', 'application/json']) {
 		for (let acceptEncoding of ['', 'gzip, deflate, br', 'gzip, deflate']) {
-			for (let compression of ['raw', 'gzip', 'br']) {
-				for (let size of [50, 50 * KB, 2 * MB, 9 * MB, 33 * MB]) {
+			for (let compression of compressions) {
+				for (let size of sizes) {
 					for (let useContentLength of [true, false]) {
 						for (let fast of [true, false]) {
 							tests.push({ contentType, acceptEncoding, compression, size, useContentLength, fast });
@@ -31,26 +49,15 @@ async function start() {
 		}
 	}
 
-	let data = Uint8Array.from({ length: 256 }, () => Math.floor(Math.random() * 256));
-	data = Buffer.from(data.buffer);
-	
+	// run tests
 	for (let [index, test] of tests.entries()) {
-		process.stderr.write(`\r   ${index + 1}/${tests.length}`)
+		process.stderr.write(`\rrun tests: ${(100 * (index + 1) / tests.length).toFixed(0)}%`)
 
 		const { contentType, acceptEncoding, compression, size, useContentLength, fast } = test;
 
-		let bufferRawIn = Buffer.allocUnsafe(size);
-		for (let i = 0; i < size; i += data.length) data.copy(bufferRawIn, i);
+		const { bufferIn, bufferRawIn } = testBuffer.get(compression, size);
 
-		let bufferIn;
-		switch (compression) {
-			case 'raw': bufferIn = bufferRawIn; break;
-			case 'gzip': bufferIn = zlib.gzipSync(bufferRawIn); break;
-			case 'br': bufferIn = zlib.brotliCompressSync(bufferRawIn); break;
-			default: throw Error();
-		}
-
-		let headersRequestIn = {'accept-encoding': acceptEncoding};
+		let headersRequestIn = { 'accept-encoding': acceptEncoding };
 
 		let headersResponseIn = {};
 		if (compression !== 'raw') headersResponseIn['content-encoding'] = compression;
@@ -79,7 +86,7 @@ async function start() {
 
 		let bufferRawOut;
 		let contentEncoding = responseHeaders['content-encoding']
-		
+
 		switch (contentEncoding) {
 			case undefined: bufferRawOut = bufferOut; break;
 			case 'br': bufferRawOut = zlib.brotliDecompressSync(bufferOut); break;
@@ -98,3 +105,46 @@ async function start() {
 
 	console.log('\nFinished')
 }
+
+class TestBuffer {
+	#data;
+	#comCache;
+	#rawCache;
+
+	constructor() {
+		this.#data = Buffer.from(Uint8Array.from({ length: 256 }, () => Math.floor(Math.random() * 256)));
+		this.#rawCache = new Map();
+		this.#comCache = new Map();
+	}
+
+	#getRaw(size) {
+		if (this.#rawCache.has(size)) return this.#rawCache.get(size);
+
+		const bufferRawIn = Buffer.allocUnsafe(size);
+		for (let i = 0; i < size; i += this.#data.length) this.#data.copy(bufferRawIn, i);
+
+		this.#rawCache.set(size, bufferRawIn);
+		return bufferRawIn;
+	}
+
+	get(compression, size) {
+		if (this.#comCache.has(compression + size)) return this.#comCache.get(compression + size);
+
+		const bufferRawIn = this.#getRaw(size);
+
+		let bufferIn;
+		switch (compression) {
+			case 'raw': bufferIn = bufferRawIn.slice(); break;
+			case 'gzip': bufferIn = zlib.gzipSync(bufferRawIn); break;
+			case 'br': bufferIn = zlib.brotliCompressSync(bufferRawIn); break;
+			default: throw Error();
+		}
+
+		const result = { bufferIn, bufferRawIn };
+		this.#comCache.set(compression + size, result);
+		return result;
+	}
+}
+
+start()
+
