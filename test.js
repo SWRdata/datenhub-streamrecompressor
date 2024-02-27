@@ -12,7 +12,7 @@ async function start() {
 	const KB = 1024; // Define a kilobyte
 	const MB = 1024 * KB; // Define a megabyte
 	// Define compression types to test
-	const compressions = ['raw', 'gzip', 'br'];
+	const compressions = ['raw', 'deflate', 'gzip', 'br'];
 	// Define different sizes of data to test with
 	const sizes = [50, 50 * KB, 2 * MB, 9 * MB, 33 * MB];
 
@@ -36,12 +36,12 @@ async function start() {
 
 	// Generate test cases combining various factors like content type, accept encoding, etc.
 	const tests = [];
-	for (let contentType of [false, 'image/png', 'application/json']) {
-		for (let acceptEncoding of ['', 'gzip, deflate, br', 'gzip, deflate']) {
-			for (let compression of compressions) {
-				for (let size of sizes) {
-					for (let useContentLength of [true, false]) {
-						for (let fast of [true, false]) {
+	for (let useContentLength of [true, false]) {
+		for (let contentType of [false, 'image/png', 'application/json']) {
+			for (let fast of [true, false]) {
+				for (let acceptEncoding of ['', 'deflate,', 'gzip, deflate, br', 'gzip, deflate']) {
+					for (let compression of compressions) {
+						for (let size of sizes) {
 							tests.push({ contentType, acceptEncoding, compression, size, useContentLength, fast });
 						}
 					}
@@ -52,7 +52,7 @@ async function start() {
 
 	// Execute each test case
 	for (let [index, test] of tests.entries()) {
-		process.stderr.write(`\rrun tests: ${(100 * (index + 1) / tests.length).toFixed(0)}%`);
+		process.stderr.write(`\rrun tests: ${(100 * (index + 1) / tests.length).toFixed(1)}%`);
 
 		const { contentType, acceptEncoding, compression, size, useContentLength, fast } = test;
 
@@ -98,6 +98,7 @@ async function start() {
 		switch (contentEncoding) {
 			case undefined: bufferRawOut = bufferOut; break;
 			case 'br': bufferRawOut = zlib.brotliDecompressSync(bufferOut); break;
+			case 'deflate': bufferRawOut = zlib.inflateSync(bufferOut); break;
 			case 'gzip': bufferRawOut = zlib.gunzipSync(bufferOut); break;
 			default: throw Error(contentEncoding);
 		}
@@ -159,9 +160,10 @@ class TestBuffer {
 
 		let bufferIn;
 		switch (compression) {
-			case 'raw': bufferIn = bufferRawIn.slice(); break;
-			case 'gzip': bufferIn = zlib.gzipSync(bufferRawIn); break;
-			case 'br': bufferIn = zlib.brotliCompressSync(bufferRawIn); break;
+			case 'raw': bufferIn = bufferRawIn.subarray(); break;
+			case 'deflate': bufferIn = zlib.deflateSync(bufferRawIn, { level: 9 }); break;
+			case 'gzip': bufferIn = zlib.gzipSync(bufferRawIn, { level: 9 }); break;
+			case 'br': bufferIn = zlib.brotliCompressSync(bufferRawIn, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 9 } }); break;
 			default: throw Error('Unsupported compression type');
 		}
 
